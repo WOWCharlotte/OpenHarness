@@ -166,13 +166,21 @@ class OpenHarnessAgent(BaseInstalledAgent):
         # Collect environment variables from host to pass into the container.
         # Harbor does not automatically pass host env vars to the agent process.
         env: dict[str, str] = {}
-        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+        api_key: str | None = None
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
             val = os.environ.get(key)
             if val:
                 env[key] = val
+                if api_key is None:
+                    api_key = val
 
         # Build the oh command
         cmd_parts = ["oh", "-p", escaped_instruction]
+
+        # Pass API key directly via --api-key to bypass credential storage lookup.
+        # This avoids issues with profile.credential_slot loading stale/missing keys.
+        if api_key:
+            cmd_parts.extend(["--api-key", api_key])
 
         if self.model_name:
             cmd_parts.extend(["-m", self.model_name])
@@ -190,11 +198,11 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
         command = " ".join(cmd_parts)
 
-        # Prepend debug command to see env vars inside container
+        # Debug: print env vars received inside container
         debug_cmd = (
             "python3 -c 'import os; "
-            "print(\"ENV_ANTHROPIC=\", os.environ.get(\"ANTHROPIC_API_KEY\", \"NOT_SET\")[:15] if os.environ.get(\"ANTHROPIC_API_KEY\") else \"NOT_SET\"); "
-            "print(\"ENV_OPENAI=\", os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")[:15] if os.environ.get(\"OPENAI_API_KEY\") else \"NOT_SET\")' && "
+            "print(\"ENV_ANTHROPIC=\", os.environ.get(\"ANTHROPIC_API_KEY\", \"NOT_SET\")[:20] if os.environ.get(\"ANTHROPIC_API_KEY\") else \"NOT_SET\"); "
+            "print(\"ENV_OPENAI=\", os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")[:20] if os.environ.get(\"OPENAI_API_KEY\") else \"NOT_SET\")' && "
         )
         full_command = debug_cmd + command
 
