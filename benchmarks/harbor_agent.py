@@ -174,6 +174,12 @@ class OpenHarnessAgent(BaseInstalledAgent):
                 if api_key is None:
                     api_key = val
 
+        # Also pass OPENAI_BASE_URL to ensure correct MiniMax Chinese endpoint.
+        base_url = os.environ.get("OPENAI_BASE_URL")
+        if not base_url:
+            base_url = os.environ.get("OPENAI_BASE_URL", "https://api.minimaxi.com/v1")
+        env["OPENAI_BASE_URL"] = base_url
+
         # Build the oh command
         cmd_parts = ["oh", "-p", escaped_instruction]
 
@@ -198,11 +204,18 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
         command = " ".join(cmd_parts)
 
-        # Debug: print env vars received inside container
+        # Debug: print config files inside container
         debug_cmd = (
-            "python3 -c 'import os; "
-            "print(\"ENV_ANTHROPIC=\", os.environ.get(\"ANTHROPIC_API_KEY\", \"NOT_SET\")[:20] if os.environ.get(\"ANTHROPIC_API_KEY\") else \"NOT_SET\"); "
-            "print(\"ENV_OPENAI=\", os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")[:20] if os.environ.get(\"OPENAI_API_KEY\") else \"NOT_SET\")' && "
+            "python3 -c \""
+            "import os, pathlib, json; "
+            "home = pathlib.Path(os.environ.get('HOME', '/root')); "
+            "cred = home / '.openharness' / 'credentials.json'; "
+            "sett = home / '.openharness' / 'settings.json'; "
+            "print('CRED_FILE:', cred, 'exists:', cred.exists()); "
+            "if cred.exists(): print('CRED:', cred.read_text()[:500]); "
+            "print('SETT_FILE:', sett, 'exists:', sett.exists()); "
+            "if sett.exists(): print('SETT:', sett.read_text()[:800]); "
+            "\" && "
         )
         full_command = debug_cmd + command
 
