@@ -35,3 +35,8 @@ react_tui_smoke.txt
 .DS_Store
 Thumbs.db
 uv.lock
+
+
+# CLAUDE
+CLAUDE.md
+.claude/settings.local.json
