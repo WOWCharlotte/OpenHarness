@@ -128,6 +128,27 @@ class OpenHarnessAgent(BaseInstalledAgent):
             ),
         )
 
+        # Step 5: Configure minimax endpoint provider
+        # The API key is passed via ANTHROPIC_API_KEY from host environment at runtime.
+        # We pre-configure the provider here so 'oh -m minimax-m2.7' works in the run phase.
+        await environment.exec(
+            command=(
+                "cd /home/user/openharness && "
+                "PYTHON=$(command -v python3); "
+                "$PYTHON -m openharness.cli provider add minimax-endpoint "
+                "  --label 'MiniMax' "
+                "  --provider anthropic "
+                "  --api-format openai "
+                "  --auth-source anthropic_api_key "
+                "  --model minimax-m2.7 "
+                "  --base-url https://api.minimaxi.com/v1 "
+                "2>/dev/null || "
+                "echo 'provider add failed (may already exist or oh cli issue - continuing)'; "
+                "$PYTHON -m openharness.cli provider use minimax-endpoint "
+                "2>/dev/null || true"
+            ),
+        )
+
     async def run(
         self,
         instruction: str,
