@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import shlex
 
 from harbor.agents.installed.base import BaseInstalledAgent
@@ -162,6 +163,14 @@ class OpenHarnessAgent(BaseInstalledAgent):
         """
         escaped_instruction = shlex.quote(instruction)
 
+        # Collect environment variables from host to pass into the container.
+        # Harbor does not automatically pass host env vars to the agent process.
+        env: dict[str, str] = {}
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+            val = os.environ.get(key)
+            if val:
+                env[key] = val
+
         # Build the oh command
         cmd_parts = ["oh", "-p", escaped_instruction]
 
@@ -184,6 +193,7 @@ class OpenHarnessAgent(BaseInstalledAgent):
         result = await environment.exec(
             command=command,
             timeout_sec=None,  # Harbor manages timeouts
+            env=env if env else None,
         )
 
         # Write output to logs
