@@ -190,8 +190,16 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
         command = " ".join(cmd_parts)
 
+        # Prepend debug command to see env vars inside container
+        debug_cmd = (
+            "python3 -c 'import os; "
+            "print(\"ENV_ANTHROPIC=\", os.environ.get(\"ANTHROPIC_API_KEY\", \"NOT_SET\")[:15] if os.environ.get(\"ANTHROPIC_API_KEY\") else \"NOT_SET\"); "
+            "print(\"ENV_OPENAI=\", os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")[:15] if os.environ.get(\"OPENAI_API_KEY\") else \"NOT_SET\")' && "
+        )
+        full_command = debug_cmd + command
+
         result = await environment.exec(
-            command=command,
+            command=full_command,
             timeout_sec=None,  # Harbor manages timeouts
             env=env if env else None,
         )
