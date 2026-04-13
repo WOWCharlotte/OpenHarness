@@ -14,7 +14,7 @@ Integrate OpenHarness as a `BaseInstalledAgent` in the Harbor framework (v0.3.0)
 |-----------|------|
 | `benchmarks/harbor_agent.py` | `OpenHarnessAgent` — implements `BaseInstalledAgent` |
 | Harbor framework | Downloads tasks, provisions containers, runs agent, verifies results |
-| `openharness-ai` package | OpenHarness agent (installed inside container) |
+| `openharness` package | OpenHarness agent (installed inside container) |
 | `oh -p` CLI | Headless single-prompt mode with JSON streaming output |
 
 ### Data Flow
@@ -65,8 +65,16 @@ class OpenHarnessAgent(BaseInstalledAgent):
 Via Jinja2 template (`install_openharness.sh.j2`):
 
 1. Ensure `git` is available (`apt-get install -y git`)
-2. Clone OpenHarness repo into `/home/user/openharness`
-3. `pip install -e /home/user/openharness[dev]`
+2. Clone from `https://github.com/WOWCharlotte/OpenHarness` into `/home/user/openharness`
+3. `pip install -e /home/user/openharness[dev]` (or `uv sync --extra dev` if pip unavailable)
+
+> See [docs/start.md](../../start.md) for full installation reference.
+
+**Provider configuration in container:**
+- API keys are passed via `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars (from host through Harbor)
+- Model is set via `--model` flag → passed as `OPENHARNESS_MODEL` env var
+- If using custom endpoint (e.g. MiniMax), also pass `OPENAI_BASE_URL`
+- No `oh provider add` needed — keys passed directly via CLI flags or env vars
 
 ### `run()` Phase
 
