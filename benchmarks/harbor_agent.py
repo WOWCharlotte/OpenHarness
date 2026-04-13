@@ -206,16 +206,19 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
         # Debug: print config files inside container
         debug_cmd = (
-            "python3 -c \""
-            "import os, pathlib, json; "
-            "home = pathlib.Path(os.environ.get('HOME', '/root')); "
-            "cred = home / '.openharness' / 'credentials.json'; "
-            "sett = home / '.openharness' / 'settings.json'; "
-            "print('CRED_FILE:', cred, 'exists:', cred.exists()); "
-            "if cred.exists(): print('CRED:', cred.read_text()[:500]); "
-            "print('SETT_FILE:', sett, 'exists:', sett.exists()); "
-            "if sett.exists(): print('SETT:', sett.read_text()[:800]); "
-            "\" && "
+            "python3 << 'PYEOF'\n"
+            "import os, pathlib, json\n"
+            "home = pathlib.Path(os.environ.get('HOME', '/root'))\n"
+            "cred = home / '.openharness' / 'credentials.json'\n"
+            "sett = home / '.openharness' / 'settings.json'\n"
+            "print('CRED_FILE:', cred, 'exists:', cred.exists())\n"
+            "if cred.exists():\n"
+            "    print('CRED:', cred.read_text()[:500])\n"
+            "print('SETT_FILE:', sett, 'exists:', sett.exists())\n"
+            "if sett.exists():\n"
+            "    print('SETT:', sett.read_text()[:800])\n"
+            "PYEOF\n"
+            "echo '---oh output start---'\n"
         )
         full_command = debug_cmd + command
 
