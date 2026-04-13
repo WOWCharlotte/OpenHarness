@@ -12,9 +12,9 @@ Usage:
 from __future__ import annotations
 
 import shlex
-from pathlib import Path
 
-from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
+from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 
@@ -22,8 +22,8 @@ class OpenHarnessAgent(BaseInstalledAgent):
     """
     Runs OpenHarness (oh CLI) inside a Harbor container for Terminal Bench.
 
-    install() phase:  clones repo + pip install (via install_openharness.sh.j2)
-    run() phase:      oh -p "<instruction>" --model ... --permission-mode full_auto
+    install():  clones repo + pip install
+    run():      oh -p "<instruction>" --model ... --permission-mode full_auto
     """
 
     @staticmethod
@@ -31,52 +31,149 @@ class OpenHarnessAgent(BaseInstalledAgent):
         """Agent name registered in Harbor."""
         return "openharness"
 
-    @property
-    def _install_agent_template_path(self) -> Path:
-        """Path to the Jinja2 shell script template for the install phase."""
-        return Path(__file__).parent / "install_openharness.sh.j2"
-
-    def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
+    async def install(self, environment: BaseEnvironment) -> None:
         """
-        Build the command to run OpenHarness for a single task instruction.
+        Install OpenHarness inside the container.
 
-        Args:
-            instruction: The task instruction string from Harbor.
+        Strategy:
+        1. Ensure git is available (apt-get only for git - tiny and fast)
+        2. Clone OpenHarness repo
+        3. Ensure python3 >= 3.10 (standalone install from GitHub if too old)
+        4. pip install -e .[dev]
+        """
+        # Step 1: Ensure git is available
+        await environment.exec(
+            command=(
+                "( command -v git >/dev/null 2>&1 || "
+                " ( "
+                "   for i in $(seq 1 15); do "
+                "     fuser /var/lib/dpkg/lock >/dev/null 2>&1 || break; sleep 2; "
+                "   done && "
+                "   apt-get update -qq 2>/dev/null && "
+                "   apt-get install -y -qq git 2>/dev/null ) "
+                ") || true"
+            ),
+        )
 
-        Returns:
-            A single ExecInput with the oh command to execute.
+        # Step 2: Clone OpenHarness repo
+        await environment.exec(
+            command=(
+                "if [ -d /home/user/openharness ]; then "
+                " echo 'openharness already exists'; "
+                "elif command -v git >/dev/null 2>&1; then "
+                " git clone --depth 1 "
+                " https://github.com/WOWCharlotte/OpenHarness.git "
+                " /home/user/openharness; "
+                "else "
+                " echo 'No git, downloading tarball...' && "
+                " mkdir -p /home/user/openharness && "
+                " URL='https://github.com/WOWCharlotte/OpenHarness/archive/refs/heads/main.tar.gz' && "
+                " ( curl -sL \"$URL\" 2>/dev/null || wget -qO- \"$URL\" 2>/dev/null ) "
+                " | tar -xz --strip-components=1 -C /home/user/openharness; "
+                "fi"
+            ),
+        )
+
+        # Step 3: Ensure python3 >= 3.10 (standalone install if too old)
+        await environment.exec(
+            command=(
+                "NEED_INSTALL=0; "
+                "if command -v python3 >/dev/null 2>&1; then "
+                " PY_MAJOR=$(python3 -c 'import sys; print(sys.version_info[0])' 2>/dev/null); "
+                " PY_MINOR=$(python3 -c 'import sys; print(sys.version_info[1])' 2>/dev/null); "
+                " echo \"python3 found: $(python3 --version) (major=$PY_MAJOR minor=$PY_MINOR)\"; "
+                " if [ \"$PY_MAJOR\" -lt 3 ] 2>/dev/null || [ \"$PY_MINOR\" -lt 10 ] 2>/dev/null; then "
+                "   echo \"Python $PY_MAJOR.$PY_MINOR is too old (need >= 3.10), upgrading...\"; "
+                "   NEED_INSTALL=1; "
+                " fi; "
+                "else "
+                " echo 'No python3 found'; "
+                " NEED_INSTALL=1; "
+                "fi; "
+                "if [ \"$NEED_INSTALL\" = \"1\" ]; then "
+                " echo 'Installing standalone Python 3.12 from GitHub...' && "
+                " URL='https://github.com/astral-sh/python-build-standalone/releases/"
+                "download/20250604/cpython-3.12.11+20250604-x86_64-unknown-linux-gnu-install_only.tar.gz' && "
+                " ( curl -sL -o /tmp/python.tar.gz \"$URL\" 2>/dev/null || "
+                "   wget -q -O /tmp/python.tar.gz \"$URL\" 2>/dev/null || "
+                "   ( apt-get update -qq 2>/dev/null && apt-get install -y -qq curl 2>/dev/null && "
+                "     curl -sL -o /tmp/python.tar.gz \"$URL\" ) "
+                " ) && "
+                " mkdir -p /opt/python && "
+                " tar -xzf /tmp/python.tar.gz -C /opt/python --strip-components=1 && "
+                " ln -sf /opt/python/bin/python3 /usr/local/bin/python3 && "
+                " ln -sf /opt/python/bin/pip3 /usr/local/bin/pip3 && "
+                " ln -sf /opt/python/bin/python3 /usr/local/bin/python && "
+                " rm -f /tmp/python.tar.gz && "
+                " hash -r 2>/dev/null; "
+                " echo \"standalone python installed: $(/usr/local/bin/python3 --version)\"; "
+                "else "
+                " echo 'Python version OK, no upgrade needed'; "
+                "fi"
+            ),
+        )
+
+        # Step 4: pip install -e .[dev]
+        await environment.exec(
+            command=(
+                "PYTHON=$(command -v python3); "
+                "cd /home/user/openharness && "
+                "if [ -f pyproject.toml ]; then "
+                "  $PYTHON -m pip install --break-system-packages -e . 2>/dev/null || "
+                "  pip3 install --break-system-packages -e . 2>/dev/null || "
+                "  $PYTHON -m pip install --break-system-packages -e .[dev] 2>/dev/null; "
+                "fi; "
+                "$PYTHON -c 'import openharness; print(\"openharness OK\")' 2>/dev/null || "
+                "echo 'openharness installation may have issues but continuing'"
+            ),
+        )
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """
+        Run OpenHarness for the given task instruction.
+
+        Executes: oh -p "<instruction>" -m <model> --permission-mode full_auto
         """
         escaped_instruction = shlex.quote(instruction)
 
-        # Build env dict - Harbor injects API keys via host environment automatically
-        env: dict[str, str] = {}
+        # Build the oh command
+        cmd_parts = ["oh", "-p", escaped_instruction]
 
-        # Model is passed via --model CLI flag; use it as command-line arg
-        model_arg: list[str] = []
         if self.model_name:
-            model_arg = ["-m", self.model_name]
+            cmd_parts.extend(["-m", self.model_name])
 
-        command_parts = [
-            "oh",
-            "-p",
-            escaped_instruction,
-            *model_arg,
-            "--permission-mode",
-            "full_auto",
-            "--output-format",
-            "stream-json",
-            "--max-turns",
-            "50",
-        ]
+        cmd_parts.extend(
+            [
+                "--permission-mode",
+                "full_auto",
+                "--output-format",
+                "stream-json",
+                "--max-turns",
+                "50",
+            ]
+        )
 
-        return [
-            ExecInput(
-                command=" ".join(command_parts),
-                cwd=None,  # run in task working directory
-                env=env if env else None,
-                timeout_sec=None,  # Harbor manages timeouts
-            )
-        ]
+        command = " ".join(cmd_parts)
+
+        result = await environment.exec(
+            command=command,
+            timeout_sec=None,  # Harbor manages timeouts
+        )
+
+        # Write output to logs
+        logs_dir = self.logs_dir
+        run_dir = logs_dir / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "return-code.txt").write_text(str(result.return_code))
+        if result.stdout:
+            (run_dir / "stdout.txt").write_text(result.stdout)
+        if result.stderr:
+            (run_dir / "stderr.txt").write_text(result.stderr)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         """
