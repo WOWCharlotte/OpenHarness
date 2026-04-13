@@ -204,26 +204,8 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
         command = " ".join(cmd_parts)
 
-        # Debug: print config files inside container
-        debug_cmd = (
-            "python3 << 'PYEOF'\n"
-            "import os, pathlib, json\n"
-            "home = pathlib.Path(os.environ.get('HOME', '/root'))\n"
-            "cred = home / '.openharness' / 'credentials.json'\n"
-            "sett = home / '.openharness' / 'settings.json'\n"
-            "print('CRED_FILE:', cred, 'exists:', cred.exists())\n"
-            "if cred.exists():\n"
-            "    print('CRED:', cred.read_text()[:500])\n"
-            "print('SETT_FILE:', sett, 'exists:', sett.exists())\n"
-            "if sett.exists():\n"
-            "    print('SETT:', sett.read_text()[:800])\n"
-            "PYEOF\n"
-            "echo '---oh output start---'\n"
-        )
-        full_command = debug_cmd + command
-
         result = await environment.exec(
-            command=full_command,
+            command=command,
             timeout_sec=None,  # Harbor manages timeouts
             env=env if env else None,
         )
