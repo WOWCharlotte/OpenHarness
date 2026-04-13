@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+
+# Install system dependencies
+apt-get update -qq
+apt-get install -y -qq git python3 python3-pip > /dev/null 2>&1
+
+# Clone OpenHarness repo
+git clone --depth 1 https://github.com/WOWCharlotte/OpenHarness.git /home/user/openharness
+
+# Install with pip (editable mode with dev extras)
+pip install --break-system-packages -e /home/user/openharness[dev]
+
+# Verify installation
+python3 -c "import openharness; print('openharness OK')"
