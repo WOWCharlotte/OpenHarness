@@ -1,6 +1,6 @@
 # OpenHarness Benchmark Agent for Terminal Bench 2.0
 
-This directory contains the `OpenHarnessAgent` for running OpenHarness benchmarks using [Harbor](https://github.com/HKUDS/Harbor).
+This directory contains the `OpenHarnessAgent` for running OpenHarness benchmarks using Harbor.
 
 ## OpenHarnessAgent
 
@@ -12,8 +12,6 @@ This directory contains the `OpenHarnessAgent` for running OpenHarness benchmark
 2. **Clone OpenHarness repo** — shallow clone from GitHub
 3. **Ensure Python >= 3.10** — installs standalone Python 3.12 if system Python is too old
 4. **Install dependencies** — `pip install -e .[dev]`
-5. **Configure provider** — sets up `minimax-endpoint` profile
-6. **Run debug test** — executes `test_api_resolution_debug.py` to verify settings
 
 ### Runtime Flow (`run()`)
 
@@ -55,7 +53,7 @@ The agent configures a `minimax-endpoint` profile:
 export OPENAI_API_KEY="your-minimax-api-key"
 harbor run -d "terminal-bench@2.0" \
   --agent-import-path benchmarks.harbor_agent:OpenHarnessAgent \
-  --task-names build-cython-ext \
+  --task-names terminal-bench/build-cython-ext \
   --model minimax-m2.7 \
   --n-concurrent 1
 ```
@@ -73,7 +71,7 @@ Replace `build-cython-ext` with any Terminal Bench 2.0 task, for example:
 ```bash
 harbor run -d "terminal-bench@2.0" \
   --agent-import-path benchmarks.harbor_agent:OpenHarnessAgent \
-  --task-names build-cython-ext sed-replace git-conflict \
+  --task-names terminal-bench/build-cython-ext terminal-bench/sed-replace terminal-bench/git-conflict \
   --model minimax-m2.7 \
   --n-concurrent 3
 ```
