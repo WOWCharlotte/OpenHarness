@@ -121,10 +121,12 @@ transcripts grep                  ↓                              ↓
 ## 文件变更
 
 ```
+src/openharness/prompts/
+  ├── dream_consolidation.md  # 新增：dream consolidation prompt 模板
+  └── context.py              # 修改：整合手动触发入口
+
 src/openharness/memory/
-  ├── consolidation.py          # 新增：DreamEngine 类
-  ├── templates/
-  │   └── dream_consolidation.md # 新增：prompt 模板
+  └── consolidation.py        # 新增：DreamEngine 类
 
 src/openharness/commands/
   └── dream.py                  # 新增：/dream 命令
