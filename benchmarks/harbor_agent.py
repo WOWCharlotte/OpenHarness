@@ -11,7 +11,9 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shlex
 
 from harbor.agents.installed.base import BaseInstalledAgent
@@ -209,9 +211,169 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         """
-        Populate context after run() completes.
+        Parse oh -p stream-json output from run/stdout.txt and produce trajectory.json.
 
-        OpenHarness outputs stream-json to stdout which Harbor already captured.
-        No trajectory parsing needed - Harbor verifier handles pass/fail.
+        Writes OH-eval-v1 trajectory to {logs_dir}/run/trajectory.json
+        and populates AgentContext metrics.
         """
-        pass
+        run_dir = self.logs_dir / "run"
+        stdout_path = run_dir / "stdout.txt"
+
+        if not stdout_path.exists():
+            self.logger.debug("No stdout.txt found, skipping trajectory generation")
+            return
+
+        # --- Two-pass parse ---
+        raw_events: list[dict] = []
+        with open(stdout_path, "r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw_events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    self.logger.debug(f"Skipped malformed JSON line {lineno}")
+                    continue
+
+        # --- Build pending tool calls (pass 1: pair tool_started with tool_completed) ---
+        pending_calls: dict[str, dict] = {}  # tool_name -> event
+        tool_pairs: list[tuple[dict, dict | None]] = []  # (started, completed) pairs
+
+        for ev in raw_events:
+            ev_type = ev.get("type")
+            if ev_type == "tool_started":
+                tool_name = str(ev.get("tool_name") or "")
+                pending_calls[tool_name] = ev
+            elif ev_type == "tool_completed":
+                tool_name = str(ev.get("tool_name") or "")
+                started = pending_calls.pop(tool_name, None)
+                tool_pairs.append((started, ev))
+
+        # Remaining pending = tool_started with no matching tool_completed
+        for started in pending_calls.values():
+            tool_pairs.append((started, None))
+
+        # --- Build step sequence (pass 2) ---
+        from benchmarks.trajectory_schema import (
+            Agent,
+            FinalMetrics,
+            Observation,
+            ObservationResult,
+            Step,
+            ToolCallStep,
+            Trajectory,
+        )
+
+        steps: list[Step] = []
+        current_text_parts: list[str] = []
+        current_reasoning_parts: list[str] = []
+        step_counter = 0
+        pair_index = 0
+
+        for ev in raw_events:
+            ev_type = ev.get("type")
+
+            if ev_type == "assistant_delta":
+                text = str(ev.get("text") or "")
+                current_text_parts.append(text)
+                # Extract thinking blocks
+                thinking_blocks = re.findall(
+                    r"<thinking>(.*?)</thinking>", text, re.DOTALL
+                )
+                current_reasoning_parts.extend(b.strip() for b in thinking_blocks if b.strip())
+
+            elif ev_type == "assistant_complete":
+                # Finalize current assistant message as a step
+                full_text = "".join(current_text_parts).strip()
+                reasoning = (
+                    "\n\n".join(p for p in current_reasoning_parts if p) or None
+                )
+                # Strip thinking tags from message
+                if reasoning:
+                    full_text = re.sub(
+                        r"<thinking>.*?</thinking>", "", full_text, flags=re.DOTALL
+                    ).strip()
+                if full_text or reasoning:
+                    step_counter += 1
+                    steps.append(Step(
+                        step_id=step_counter,
+                        source="agent",
+                        message=full_text or None,
+                        reasoning_content=reasoning,
+                    ))
+                current_text_parts.clear()
+                current_reasoning_parts.clear()
+
+            elif ev_type == "tool_started":
+                tool_name = str(ev.get("tool_name") or "")
+                tool_input = ev.get("tool_input") or {}
+                step_counter += 1
+                tc_id = f"tool-{pair_index + 1}"
+                steps.append(Step(
+                    step_id=step_counter,
+                    source="agent",
+                    tool_calls=[ToolCallStep(
+                        tool_call_id=tc_id,
+                        function_name=tool_name,
+                        arguments=dict(tool_input) if isinstance(tool_input, dict) else {"input": str(tool_input)},
+                    )],
+                ))
+                pair_index += 1
+
+            elif ev_type == "tool_completed":
+                # Attach observation to the most recent agent step with matching tool
+                tool_name = str(ev.get("tool_name") or "")
+                output = ev.get("output")
+                is_error = ev.get("is_error")
+                if isinstance(output, str):
+                    output = output.strip()
+                # Backward search for last step with same tool_name
+                for step in reversed(steps):
+                    if step.tool_calls and step.tool_calls[0].function_name == tool_name:
+                        step.observation = Observation(results=[ObservationResult(
+                            source_call_id=step.tool_calls[0].tool_call_id,
+                            content=output,
+                            is_error=bool(is_error) if is_error is not None else None,
+                        )])
+                        break
+
+        # --- Compute metrics ---
+        total_errors = sum(
+            1 for s in steps
+            if s.observation and s.observation.results
+            and s.observation.results[0].is_error
+        )
+        total_tool_calls = sum(1 for s in steps if s.tool_calls)
+
+        # --- Write trajectory.json ---
+        session_id = self.logs_dir.name
+        trajectory = Trajectory(
+            schema_version="OH-eval-v1",
+            session_id=session_id,
+            agent=Agent(
+                name="openharness",
+                version="unknown",
+                model_name=self.model_name,
+            ),
+            steps=steps,
+            final_metrics=FinalMetrics(
+                total_steps=len(steps),
+                total_tool_calls=total_tool_calls,
+                total_errors=total_errors,
+            ),
+        )
+
+        trajectory_path = run_dir / "trajectory.json"
+        try:
+            with open(trajectory_path, "w", encoding="utf-8") as f:
+                json.dump(trajectory.to_dict(), f, indent=2, ensure_ascii=False)
+            self.logger.debug(f"Wrote trajectory to {trajectory_path}")
+        except OSError as exc:
+            self.logger.debug(f"Failed to write trajectory: {exc}")
+
+        # --- Populate AgentContext (token fields stay 0; cost stays None) ---
+        context.n_input_tokens = 0
+        context.n_output_tokens = 0
+        context.n_cache_tokens = 0
+        context.cost_usd = None
