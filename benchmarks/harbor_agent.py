@@ -129,6 +129,7 @@ class OpenHarnessAgent(BaseInstalledAgent):
             ),
         )
 
+
         # Step 5: Configure minimax endpoint provider
         # The API key is passed via ANTHROPIC_API_KEY from host environment at runtime.
         # We pre-configure the provider here so 'oh -m minimax-m2.7' works in the run phase.
@@ -147,6 +148,16 @@ class OpenHarnessAgent(BaseInstalledAgent):
                 "echo 'provider add failed (may already exist or oh cli issue - continuing)'; "
                 "$PYTHON -m openharness.cli provider use minimax-endpoint "
                 "2>/dev/null || true"
+            ),
+        )
+
+        # Step 6: Run API resolution debug test to verify settings
+        await environment.exec(
+            command=(
+                "cd /home/user/openharness && "
+                "PYTHON=$(command -v python3); "
+                "$PYTHON -m pytest tests/test_api_resolution_debug.py -v -s 2>&1 || "
+                "echo 'test failed or not found - continuing'"
             ),
         )
 
