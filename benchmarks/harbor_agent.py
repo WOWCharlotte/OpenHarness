@@ -130,37 +130,6 @@ class OpenHarnessAgent(BaseInstalledAgent):
         )
 
 
-        # Step 5: Configure minimax endpoint provider
-        # The API key is passed via OPENAI_API_KEY from host environment at runtime.
-        # We pre-configure the provider here so 'oh -m minimax-m2.7' works in the run phase.
-        await environment.exec(
-            command=(
-                "cd /home/user/openharness && "
-                "PYTHON=$(command -v python3); "
-                "$PYTHON -m openharness.cli provider add minimax-endpoint "
-                "  --label 'MiniMax' "
-                "  --provider anthropic "
-                "  --api-format openai "
-                "  --auth-source anthropic_api_key "
-                "  --model minimax-m2.7 "
-                "  --base-url https://api.minimaxi.com/v1 "
-                "2>/dev/null || "
-                "echo 'provider add failed (may already exist or oh cli issue - continuing)'; "
-                "$PYTHON -m openharness.cli provider use minimax-endpoint "
-                "2>/dev/null || true"
-            ),
-        )
-
-        # Step 6: Run API resolution debug test to verify settings
-        await environment.exec(
-            command=(
-                "cd /home/user/openharness && "
-                "PYTHON=$(command -v python3); "
-                "$PYTHON -m pytest tests/test_api_resolution_debug.py -v -s 2>&1 || "
-                "echo 'test failed or not found - continuing'"
-            ),
-        )
-
     async def run(
         self,
         instruction: str,
@@ -178,12 +147,20 @@ class OpenHarnessAgent(BaseInstalledAgent):
         # Harbor does not automatically pass host env vars to the agent process.
         env: dict[str, str] = {}
         openai_api_key: str | None = None
+        openai_base_url: str | None = None
         for key in ("OPENAI_API_KEY",):
             val = os.environ.get(key)
             if val:
                 env[key] = val
                 if openai_api_key is None:
                     openai_api_key = val
+        for base_url in ('OPENAI_BASE_URL'):
+            val = os.environ.get(base_url,"https://api.minimaxi.com/v1")
+            if val:
+                env[base_url] = val
+                if openai_base_url is None:
+                    openai_base_url = val
+            
 
         # Build the oh command with MiniMax OpenAI-compatible endpoint
         cmd_parts = ["oh", "-p", escaped_instruction]
@@ -200,7 +177,7 @@ class OpenHarnessAgent(BaseInstalledAgent):
         cmd_parts.extend(
             [
                 "--base-url",
-                "https://api.minimaxi.com/v1",
+                openai_base_url,
                 "--api-format",
                 "openai",
                 "--permission-mode",
@@ -208,7 +185,7 @@ class OpenHarnessAgent(BaseInstalledAgent):
                 "--output-format",
                 "stream-json",
                 "--max-turns",
-                "50",
+                "100",
             ]
         )
 
