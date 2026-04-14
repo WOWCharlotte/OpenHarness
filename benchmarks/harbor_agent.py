@@ -186,7 +186,7 @@ class OpenHarnessAgent(BaseInstalledAgent):
                     openai_api_key = val
 
         # Build the oh command with MiniMax OpenAI-compatible endpoint
-        cmd_parts = ["uv", "run", "oh", "-p", escaped_instruction]
+        cmd_parts = ["oh", "-p", escaped_instruction]
 
         # Pass API key directly via -k to bypass credential storage lookup.
         if openai_api_key:
