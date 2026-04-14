@@ -131,7 +131,7 @@ class OpenHarnessAgent(BaseInstalledAgent):
 
 
         # Step 5: Configure minimax endpoint provider
-        # The API key is passed via ANTHROPIC_API_KEY from host environment at runtime.
+        # The API key is passed via OPENAI_API_KEY from host environment at runtime.
         # We pre-configure the provider here so 'oh -m minimax-m2.7' works in the run phase.
         await environment.exec(
             command=(
@@ -177,33 +177,32 @@ class OpenHarnessAgent(BaseInstalledAgent):
         # Collect environment variables from host to pass into the container.
         # Harbor does not automatically pass host env vars to the agent process.
         env: dict[str, str] = {}
-        api_key: str | None = None
-        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        openai_api_key: str | None = None
+        for key in ("OPENAI_API_KEY",):
             val = os.environ.get(key)
             if val:
                 env[key] = val
-                if api_key is None:
-                    api_key = val
+                if openai_api_key is None:
+                    openai_api_key = val
 
-        # Also pass OPENAI_BASE_URL to ensure correct MiniMax Chinese endpoint.
-        base_url = os.environ.get("OPENAI_BASE_URL")
-        if not base_url:
-            base_url = os.environ.get("OPENAI_BASE_URL", "https://api.minimaxi.com/v1")
-        env["OPENAI_BASE_URL"] = base_url
+        # Build the oh command with MiniMax OpenAI-compatible endpoint
+        cmd_parts = ["uv", "run", "oh", "-p", escaped_instruction]
 
-        # Build the oh command
-        cmd_parts = ["oh", "-p", escaped_instruction]
-
-        # Pass API key directly via --api-key to bypass credential storage lookup.
-        # This avoids issues with profile.credential_slot loading stale/missing keys.
-        if api_key:
-            cmd_parts.extend(["--api-key", api_key])
+        # Pass API key directly via -k to bypass credential storage lookup.
+        if openai_api_key:
+            cmd_parts.extend(["-k", openai_api_key])
 
         if self.model_name:
             cmd_parts.extend(["-m", self.model_name])
+        else:
+            cmd_parts.extend(["-m", "minimax-m2.7"])  # default to minimax-m2.7 if not specified
 
         cmd_parts.extend(
             [
+                "--base-url",
+                "https://api.minimaxi.com/v1",
+                "--api-format",
+                "openai",
                 "--permission-mode",
                 "full_auto",
                 "--output-format",
